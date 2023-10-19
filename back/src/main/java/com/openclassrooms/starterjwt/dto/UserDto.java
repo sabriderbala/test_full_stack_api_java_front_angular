@@ -8,6 +8,8 @@ import lombok.NonNull;
 
 import javax.validation.constraints.Email;
 import javax.validation.constraints.Size;
+
+import java.sql.Date;
 import java.time.LocalDateTime;
 
 @Data
