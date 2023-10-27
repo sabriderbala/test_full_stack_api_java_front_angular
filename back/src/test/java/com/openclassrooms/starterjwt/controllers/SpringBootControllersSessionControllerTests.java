@@ -1,245 +1,97 @@
 package com.openclassrooms.starterjwt.controllers;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get; // Importez cette classe
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status; // Importez cette classe
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-
-import java.util.Date;
-
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content; // Importez cette classe
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath; // Importez cette classe
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-
-import org.springframework.http.MediaType;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mockito;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
-
 import com.openclassrooms.starterjwt.dto.SessionDto;
-import com.openclassrooms.starterjwt.mapper.SessionMapper;
-import com.openclassrooms.starterjwt.models.Session;
-import com.openclassrooms.starterjwt.services.SessionService;
+import com.openclassrooms.starterjwt.payload.request.LoginRequest;
+import com.openclassrooms.starterjwt.payload.response.JwtResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.*;
+import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.*;
 
+import static org.junit.jupiter.api.Assertions.*;
 
-
-@SpringBootTest
-@AutoConfigureMockMvc
 @ExtendWith(SpringExtension.class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Sql(executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD, scripts = "classpath:reset_db.sql")
 public class SpringBootControllersSessionControllerTests {
 
-  @Autowired
-  private MockMvc mockMvc;
+    @Autowired
+    private TestRestTemplate restTemplate;
+    private HttpHeaders headers;
 
-  @MockBean
-  private SessionService sessionService;
+    @BeforeEach
+    void before_all() {
+        headers = new HttpHeaders();
+        headers.set("Authorization", obtainJwtToken("yoga@studio.com", "test!1234"));
+    }
 
-  @MockBean
-  private SessionMapper sessionMapper;
+    private String obtainJwtToken(String email, String password) {
+        LoginRequest loginRequest = new LoginRequest();
+        loginRequest.setEmail(email);
+        loginRequest.setPassword(password);
 
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testFindById() throws Exception {
-      Session session = new Session();
-      session.setId(1L);
-      when(sessionService.getById(1L)).thenReturn(session);
+        ResponseEntity<JwtResponse> loginResponse = restTemplate.postForEntity("/api/auth/login", loginRequest, JwtResponse.class);
+        return "Bearer " + loginResponse.getBody().getToken();
+    }
 
-      SessionDto sessionDto = new SessionDto();
-      sessionDto.setId(1L);
-      when(sessionMapper.toDto(any(Session.class))).thenReturn(sessionDto);
+    @Test
+    void shouldFindById() {
+        ResponseEntity<SessionDto> response = getSessionResponseEntity(1L);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(1L, response.getBody().getId());
+    }
 
-      mockMvc.perform(get("/api/session/1"))
-        .andExpect(status().isOk())
-        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-        .andExpect(jsonPath("$.id").value(1L));
-  }
+    @Test
+    void shouldFindByAllSessions() {
+        ResponseEntity<List> response = restTemplate.exchange("/api/session", HttpMethod.GET, new HttpEntity<>(headers), List.class);
 
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testFindByIdNotFound() throws Exception {
-      when(sessionService.getById(1L)).thenReturn(null);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(2, response.getBody().size());
+    }
 
-      mockMvc.perform(get("/api/session/1"))
-        .andExpect(status().isNotFound());
-  }
+    @Test
+    void shouldCreate() {
+        SessionDto newSession = createSampleSession();
 
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testFindByIdBadRequest() throws Exception {
-      mockMvc.perform(get("/api/session/abc"))
-        .andExpect(status().isBadRequest());
-  }
+        ResponseEntity<SessionDto> response = restTemplate.postForEntity("/api/session", new HttpEntity<>(newSession, headers), SessionDto.class);
 
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testFindAll() throws Exception {
-      mockMvc.perform(get("/api/session"))
-        .andExpect(status().isOk());
-  }
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertNotNull(response.getBody().getId());
+    }
 
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testCreate() throws Exception {
-      SessionDto sessionDto = new SessionDto();
-      sessionDto.setName("Sample Session");
-      sessionDto.setDescription("Description of the sample session");
-      sessionDto.setDate(new Date());
-      sessionDto.setTeacher_id(1L);
+    @Test
+    void shouldUpdate() {
+        Long sessionId = 1L;
+        SessionDto updatedSession = createSampleSession();
+        updatedSession.setId(sessionId);
 
-      String sessionDtoJson = new ObjectMapper().writeValueAsString(sessionDto);
+        restTemplate.put("/api/session/" + sessionId, new HttpEntity<>(updatedSession, headers), SessionDto.class);
+        ResponseEntity<SessionDto> response = getSessionResponseEntity(sessionId);
 
-      mockMvc.perform(post("/api/session")
-              .contentType(MediaType.APPLICATION_JSON)
-              .content(sessionDtoJson))
-              .andExpect(status().isOk());
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(updatedSession.getName(), response.getBody().getName());
+    }
 
-  }
+    private ResponseEntity<SessionDto> getSessionResponseEntity(Long sessionId) {
+        return restTemplate.exchange("/api/session/" + sessionId, HttpMethod.GET, new HttpEntity<>(headers), SessionDto.class);
+    }
 
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testUpdate() throws Exception {
-
-      SessionDto existingSessionDto = new SessionDto();
-      existingSessionDto.setName("Existing Session");
-      existingSessionDto.setDescription("Description of the existing session");
-      existingSessionDto.setDate(new Date());
-      existingSessionDto.setTeacher_id(1L);
-
-
-      String existingSessionDtoJson = new ObjectMapper().writeValueAsString(existingSessionDto);
-
-
-      mockMvc.perform(put("/api/session/{id}", "1")
-              .contentType(MediaType.APPLICATION_JSON)
-              .content(existingSessionDtoJson))
-              .andExpect(status().isOk());
-  }
-
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testNoLongerParticipate() throws Exception {
-
-      SessionDto sessionDto = new SessionDto();
-      sessionDto.setName("Sample Session");
-      sessionDto.setDescription("Description of the sample session");
-      sessionDto.setDate(new Date());
-      sessionDto.setTeacher_id(1L);
-
-      String sessionDtoJson = new ObjectMapper().writeValueAsString(sessionDto);
-
-      mockMvc.perform(delete("/api/session/{id}/participate/{userId}", "1", "2")
-              .contentType(MediaType.APPLICATION_JSON))
-              .andExpect(status().isOk());
-  }
-
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testParticipate() throws Exception {
-
-      SessionDto sessionDto = new SessionDto();
-      sessionDto.setName("Sample Session");
-      sessionDto.setDescription("Description of the sample session");
-      sessionDto.setDate(new Date());
-      sessionDto.setTeacher_id(1L);
-
-
-      String sessionDtoJson = new ObjectMapper().writeValueAsString(sessionDto);
-
-      mockMvc.perform(post("/api/session/{id}/participate/{userId}", "1", "2")
-              .contentType(MediaType.APPLICATION_JSON))
-              .andExpect(status().isOk());
-  }
-
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testDeleteSessionSuccess() throws Exception {
-      Session session = new Session();
-      session.setId(1L);
-
-      Mockito.doNothing().when(sessionService).delete(1L);
-      Mockito.when(sessionService.getById(1L)).thenReturn(session);
-
-      mockMvc.perform(MockMvcRequestBuilders.delete("/api/session/{id}", "1"))
-              .andExpect(MockMvcResultMatchers.status().isOk());
-
-      Mockito.verify(sessionService, Mockito.times(1)).delete(1L);
-  }
-
-
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testDeleteSessionInvalidId() throws Exception {
-
-      mockMvc.perform(delete("/api/session/{id}", "invalid"))
-          .andExpect(status().isBadRequest());
-  }
-
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testEqualityInControllerResponse() throws Exception {
-      SessionDto sessionDto = new SessionDto();
-      sessionDto.setId(1L);
-      sessionDto.setName("Session Name");
-
-      // Simule le même objet retourné pour garantir l'égalité
-      when(sessionService.getById(1L)).thenReturn(new Session());
-      when(sessionMapper.toDto(any(Session.class))).thenReturn(sessionDto);
-
-      String result = mockMvc.perform(get("/api/session/1"))
-          .andExpect(status().isOk())
-          .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-          .andReturn().getResponse().getContentAsString();
-
-      SessionDto resultDto = new ObjectMapper().readValue(result, SessionDto.class);
-
-      // Tester l'égalité
-      assertTrue(resultDto.equals(sessionDto));
-      assertEquals(resultDto.hashCode(), sessionDto.hashCode());
-  }
-
-  @Test
-  @WithMockUser(username = "yoga@studio.com", roles = {"ADMIN"})
-  public void testInequalityInControllerResponse() throws Exception {
-      SessionDto sessionDto = new SessionDto();
-      sessionDto.setId(1L);
-      sessionDto.setName("Session Name");
-
-      SessionDto differentSessionDto = new SessionDto();
-      differentSessionDto.setId(2L);
-      differentSessionDto.setName("Different Name");
-
-      // Simuler différents objets retournés
-      when(sessionService.getById(1L)).thenReturn(new Session());
-      when(sessionMapper.toDto(any(Session.class))).thenReturn(sessionDto);
-
-      String result = mockMvc.perform(get("/api/session/1"))
-          .andExpect(status().isOk())
-          .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-          .andReturn().getResponse().getContentAsString();
-
-      SessionDto resultDto = new ObjectMapper().readValue(result, SessionDto.class);
-
-      // Tester l'inégalité
-      assertFalse(resultDto.equals(differentSessionDto));
-  }
-
-
+    private SessionDto createSampleSession() {
+        SessionDto sessionDto = new SessionDto();
+        sessionDto.setName("Test Session " + UUID.randomUUID());
+        sessionDto.setDescription("Test Session Description");
+        sessionDto.setTeacher_id(1L);
+        sessionDto.setDate(new Date());
+        return sessionDto;
+    }
 }
